@@ -315,6 +315,7 @@ func clone(b ProtectionBatch) ProtectionBatch {
 		original := b.ReadinessSnapshots
 		b.ReadinessSnapshots = map[int]ReadinessSnapshot{}
 		for phase, snap := range original {
+			snap.CoverageDates = append([]string(nil), snap.CoverageDates...)
 			b.ReadinessSnapshots[phase] = snap
 		}
 	}
@@ -322,8 +323,16 @@ func clone(b ProtectionBatch) ProtectionBatch {
 		original := b.ReviewSummaries
 		b.ReviewSummaries = map[int]review.ReviewSummary{}
 		for phase, summary := range original {
+			summary.CoveredRefs = append([]string(nil), summary.CoveredRefs...)
+			summary.MissingRefs = append([]string(nil), summary.MissingRefs...)
+			summary.EvidenceDiff = append([]string(nil), summary.EvidenceDiff...)
 			b.ReviewSummaries[phase] = summary
 		}
+	}
+	if b.Archive != nil {
+		a := *b.Archive
+		a.EvidenceIndex = append([]string(nil), a.EvidenceIndex...)
+		b.Archive = &a
 	}
 	return b
 }
