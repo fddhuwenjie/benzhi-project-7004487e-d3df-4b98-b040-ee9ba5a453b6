@@ -296,7 +296,11 @@ func clone(b ProtectionBatch) ProtectionBatch {
 		readiness := b.Readiness
 		b.Readiness = make(map[int]map[string]bool, len(readiness))
 		for phase, checks := range readiness {
-			b.Readiness[phase] = checks
+			copied := make(map[string]bool, len(checks))
+			for name, ok := range checks {
+				copied[name] = ok
+			}
+			b.Readiness[phase] = copied
 		}
 	}
 	if b.PlanRefreshSummary != nil {
