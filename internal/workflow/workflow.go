@@ -1135,7 +1135,7 @@ func (w *Workflow) AuditPage(id string, from, to *time.Time, typ string, limit i
 	cached, ok := w.auditPages[cacheKey]
 	w.auditCacheMu.Unlock()
 	if ok {
-		return cached, nil
+		return cloneAuditPage(cached), nil
 	}
 	end := start + limit
 	if end > len(events) {
@@ -1155,9 +1155,44 @@ func (w *Workflow) AuditPage(id string, from, to *time.Time, typ string, limit i
 		page.NextCursor = strconv.Itoa(end)
 	}
 	w.auditCacheMu.Lock()
-	w.auditPages[cacheKey] = page
+	w.auditPages[cacheKey] = cloneAuditPage(page)
 	w.auditCacheMu.Unlock()
-	return page, nil
+	return cloneAuditPage(page), nil
+}
+
+// cloneAuditPage returns a deep copy of an AuditPage so that callers can safely
+// mutate the returned events and aggregate maps without racing against other
+// concurrent responses or polluting the shared audit page cache. Each event's
+// Detail map is shallow-copied so top-level key writes are isolated from both
+// the cache and the underlying archive store.
+func cloneAuditPage(p AuditPage) AuditPage {
+	out := AuditPage{NextCursor: p.NextCursor}
+	if p.Events != nil {
+		out.Events = make([]archive.AuditEvent, len(p.Events))
+		for i, e := range p.Events {
+			if e.Detail != nil {
+				detail := make(map[string]any, len(e.Detail))
+				for k, v := range e.Detail {
+					detail[k] = v
+				}
+				e.Detail = detail
+			}
+			out.Events[i] = e
+		}
+	}
+	if p.TypeCounts != nil {
+		out.TypeCounts = make(map[string]int, len(p.TypeCounts))
+		for k, v := range p.TypeCounts {
+			out.TypeCounts[k] = v
+		}
+	}
+	if p.RevisionRange != nil {
+		out.RevisionRange = make(map[string]int, len(p.RevisionRange))
+		for k, v := range p.RevisionRange {
+			out.RevisionRange[k] = v
+		}
+	}
+	return out
 }
 
 func auditPageCacheKey(id string, from, to *time.Time, typ string, limit int, cursor string, events []archive.AuditEvent) string {
