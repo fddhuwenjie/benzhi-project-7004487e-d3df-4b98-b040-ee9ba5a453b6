@@ -240,6 +240,7 @@ func (w *Workflow) Create(req CreateRequest, idem string) (ProtectionBatch, erro
 		b.Status = StatusPending
 	}
 	w.batches[id] = b
+	w.invalidateListCache()
 	w.auditLocked(b, "BATCH_CREATED", req.ResponsibleUser, nil)
 	out := clone(*b)
 	if idem != "" {
@@ -452,7 +453,16 @@ func (w *Workflow) checkLocked(id string, expected int) (*ProtectionBatch, error
 	}
 	return b, nil
 }
-func (w *Workflow) bump(b *ProtectionBatch) { b.Revision++; b.UpdatedAt = time.Now().UTC() }
+func (w *Workflow) bump(b *ProtectionBatch) {
+	b.Revision++
+	b.UpdatedAt = time.Now().UTC()
+	w.invalidateListCache()
+}
+func (w *Workflow) invalidateListCache() {
+	w.listCacheMu.Lock()
+	w.filteredLists = map[string]BatchListResult{}
+	w.listCacheMu.Unlock()
+}
 func (w *Workflow) auditLocked(b *ProtectionBatch, typ, actor string, detail map[string]any) {
 	e := archive.AuditEvent{ID: fmt.Sprintf("event-%s-%d-%d", b.ID, b.Revision, time.Now().UTC().UnixNano()), BatchID: b.ID, Type: typ, Revision: b.Revision, At: time.Now().UTC(), Actor: actor, Detail: detail}
 	_ = w.archive.AppendEvent(e)
