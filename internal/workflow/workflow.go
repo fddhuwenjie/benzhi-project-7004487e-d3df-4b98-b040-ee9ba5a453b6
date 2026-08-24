@@ -294,12 +294,9 @@ func clone(b ProtectionBatch) ProtectionBatch {
 	}
 	if b.Readiness != nil {
 		readiness := b.Readiness
-		b.Readiness = map[int]map[string]bool{}
+		b.Readiness = make(map[int]map[string]bool, len(readiness))
 		for phase, checks := range readiness {
-			b.Readiness[phase] = map[string]bool{}
-			for k, v := range checks {
-				b.Readiness[phase][k] = v
-			}
+			b.Readiness[phase] = checks
 		}
 	}
 	if b.PlanRefreshSummary != nil {
