@@ -28,7 +28,7 @@ func (s *Store) CreateArchive(batchID string, revision int, evidence []string, b
 	record := ArchiveRecord{ID: fmt.Sprintf("archive-%s-%d", batchID, revision), BatchID: batchID, FinalRevision: revision, RecordDigest: hex.EncodeToString(sum[:]), EvidenceIndex: append([]string(nil), evidence...), ArchivedBy: by, ArchivedAt: now, DigestVerified: true}
 	s.records[batchID] = record
 	if err := s.persistLocked(); err != nil {
-		return ArchiveRecord{}, err
+		return record, err
 	}
 	return record, nil
 }

@@ -1072,13 +1072,13 @@ func (w *Workflow) Archive(id string, expected int, actor string, evidence []str
 		seen[evidence[i]] = true
 	}
 	finalRevision := b.Revision + 1
+	b.Status = StatusArchived
+	w.bump(b)
 	r, err := w.archive.CreateArchive(id, finalRevision, evidence, actor)
+	b.Archive = &r
 	if err != nil {
 		return ProtectionBatch{}, err
 	}
-	b.Archive = &r
-	b.Status = StatusArchived
-	w.bump(b)
 	w.auditLocked(b, "ARCHIVED", actor, map[string]any{"digest": r.RecordDigest})
 	return clone(*b), nil
 }
