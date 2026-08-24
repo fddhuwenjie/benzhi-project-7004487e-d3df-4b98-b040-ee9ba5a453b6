@@ -14,16 +14,18 @@ func (s *Store) AppendEvent(e AuditEvent) error {
 	defer s.mu.Unlock()
 	s.events = append(s.events, e)
 	if s.dir != "" {
-		if err := os.MkdirAll(s.dir, 0o755); err != nil {
-			return err
+		if s.audit == nil {
+			if err := os.MkdirAll(s.dir, 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(filepath.Join(s.dir, "audit.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			if err != nil {
+				return err
+			}
+			s.audit = f
 		}
-		f, err := os.OpenFile(filepath.Join(s.dir, "audit.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
 		b, _ := json.Marshal(e)
-		if _, err = f.Write(append(b, '\n')); err != nil {
+		if _, err := s.audit.Write(append(b, '\n')); err != nil {
 			return err
 		}
 	}

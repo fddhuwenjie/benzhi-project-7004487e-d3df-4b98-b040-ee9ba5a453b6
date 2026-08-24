@@ -1,6 +1,7 @@
 package archive
 
 import (
+	"os"
 	"sync"
 	"time"
 )
@@ -31,4 +32,5 @@ type Store struct {
 	dir     string
 	events  []AuditEvent
 	records map[string]ArchiveRecord
+	audit   *os.File
 }
