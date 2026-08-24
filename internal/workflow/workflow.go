@@ -333,8 +333,6 @@ func clone(b ProtectionBatch) ProtectionBatch {
 }
 
 func (w *Workflow) Get(id string) (ProtectionBatch, error) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
 	b, ok := w.batches[id]
 	if !ok {
 		return ProtectionBatch{}, ErrNotFound
@@ -342,8 +340,6 @@ func (w *Workflow) Get(id string) (ProtectionBatch, error) {
 	return clone(*b), nil
 }
 func (w *Workflow) List() []ProtectionBatch {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
 	out := make([]ProtectionBatch, 0, len(w.batches))
 	for _, b := range w.batches {
 		item := clone(*b)
@@ -379,8 +375,6 @@ func (w *Workflow) ListFiltered(f BatchFilter) (BatchListResult, error) {
 	if f.From != nil && f.To != nil && f.From.After(*f.To) {
 		return BatchListResult{}, ErrInvalidFilter
 	}
-	w.mu.RLock()
-	defer w.mu.RUnlock()
 	out := make([]ProtectionBatch, 0)
 	for _, b := range w.batches {
 		if f.Status != "" && b.Status != f.Status || f.CurrentPhase != "" && fmt.Sprint(b.CurrentPhase) != f.CurrentPhase || f.ResponsibleUser != "" && b.ResponsibleUser != f.ResponsibleUser {
