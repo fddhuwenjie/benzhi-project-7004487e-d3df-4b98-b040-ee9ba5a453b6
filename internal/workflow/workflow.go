@@ -155,8 +155,9 @@ type Workflow struct {
 }
 
 type persistedState struct {
-	Batches map[string]*ProtectionBatch `json:"batches"`
-	Seq     int                         `json:"seq"`
+	Batches                 map[string]*ProtectionBatch `json:"batches"`
+	Seq                     int                         `json:"seq"`
+	IdempotencyFingerprints map[string]string           `json:"idempotency_fingerprints,omitempty"`
 }
 
 type idempotencyRecord struct {
@@ -169,6 +170,9 @@ func New(a *archive.Store) *Workflow {
 	var state persistedState
 	if a != nil && a.LoadState(&state) == nil && state.Batches != nil {
 		w.batches, w.seq = state.Batches, state.Seq
+		for key, fingerprint := range state.IdempotencyFingerprints {
+			w.idempotency[key] = idempotencyRecord{Fingerprint: fingerprint}
+		}
 	}
 	return w
 }
@@ -238,6 +242,9 @@ func (w *Workflow) Create(req CreateRequest, idem string) (ProtectionBatch, erro
 		b.Status = StatusPending
 	}
 	w.batches[id] = b
+	if idem != "" {
+		w.idempotency["create:"+idem] = idempotencyRecord{Fingerprint: fingerprint, Batch: clone(*b)}
+	}
 	w.auditLocked(b, "BATCH_CREATED", req.ResponsibleUser, nil)
 	out := clone(*b)
 	if idem != "" {
@@ -447,7 +454,11 @@ func (w *Workflow) auditLocked(b *ProtectionBatch, typ, actor string, detail map
 		b.InitialAuditEventID = e.ID
 		b.AuditEventID = e.ID
 	}
-	_ = w.archive.SaveState(persistedState{Batches: w.batches, Seq: w.seq})
+	fingerprints := make(map[string]string, len(w.idempotency))
+	for key, record := range w.idempotency {
+		fingerprints[key] = record.Fingerprint
+	}
+	_ = w.archive.SaveState(persistedState{Batches: w.batches, Seq: w.seq, IdempotencyFingerprints: fingerprints})
 }
 
 func (w *Workflow) AddSample(id string, expected int, s assessment.Sample, actor string) (ProtectionBatch, error) {
