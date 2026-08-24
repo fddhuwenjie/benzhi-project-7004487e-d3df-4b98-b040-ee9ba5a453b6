@@ -147,11 +147,13 @@ type CreateRequest struct {
 	Samples         []assessment.Sample `json:"samples"`
 }
 type Workflow struct {
-	mu          sync.RWMutex
-	batches     map[string]*ProtectionBatch
-	idempotency map[string]idempotencyRecord
-	archive     *archive.Store
-	seq         int
+	mu           sync.RWMutex
+	auditCacheMu sync.Mutex
+	batches      map[string]*ProtectionBatch
+	idempotency  map[string]idempotencyRecord
+	auditPages   map[string]AuditPage
+	archive      *archive.Store
+	seq          int
 }
 
 type persistedState struct {
@@ -165,7 +167,7 @@ type idempotencyRecord struct {
 }
 
 func New(a *archive.Store) *Workflow {
-	w := &Workflow{batches: map[string]*ProtectionBatch{}, idempotency: map[string]idempotencyRecord{}, archive: a}
+	w := &Workflow{batches: map[string]*ProtectionBatch{}, idempotency: map[string]idempotencyRecord{}, auditPages: map[string]AuditPage{}, archive: a}
 	var state persistedState
 	if a != nil && a.LoadState(&state) == nil && state.Batches != nil {
 		w.batches, w.seq = state.Batches, state.Seq
@@ -1128,6 +1130,13 @@ func (w *Workflow) AuditPage(id string, from, to *time.Time, typ string, limit i
 	if start > len(events) {
 		return AuditPage{}, ErrInvalidCursor
 	}
+	cacheKey := auditPageCacheKey(id, from, to, typ, limit, cursor, events)
+	w.auditCacheMu.Lock()
+	cached, ok := w.auditPages[cacheKey]
+	w.auditCacheMu.Unlock()
+	if ok {
+		return cached, nil
+	}
 	end := start + limit
 	if end > len(events) {
 		end = len(events)
@@ -1145,5 +1154,33 @@ func (w *Workflow) AuditPage(id string, from, to *time.Time, typ string, limit i
 	if end < len(events) {
 		page.NextCursor = strconv.Itoa(end)
 	}
+	w.auditCacheMu.Lock()
+	w.auditPages[cacheKey] = page
+	w.auditCacheMu.Unlock()
 	return page, nil
+}
+
+func auditPageCacheKey(id string, from, to *time.Time, typ string, limit int, cursor string, events []archive.AuditEvent) string {
+	type cacheFingerprint struct {
+		BatchID string   `json:"batch_id"`
+		From    string   `json:"from"`
+		To      string   `json:"to"`
+		Type    string   `json:"type"`
+		Limit   int      `json:"limit"`
+		Cursor  string   `json:"cursor"`
+		Events  []string `json:"events"`
+	}
+	fingerprint := cacheFingerprint{BatchID: id, Type: typ, Limit: limit, Cursor: cursor, Events: make([]string, 0, len(events))}
+	if from != nil {
+		fingerprint.From = from.UTC().Format(time.RFC3339Nano)
+	}
+	if to != nil {
+		fingerprint.To = to.UTC().Format(time.RFC3339Nano)
+	}
+	for _, event := range events {
+		fingerprint.Events = append(fingerprint.Events, event.ID)
+	}
+	b, _ := json.Marshal(fingerprint)
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:])
 }
