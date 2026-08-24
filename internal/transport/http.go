@@ -221,7 +221,7 @@ func (s *Server) observation(w http.ResponseWriter, r *http.Request, id string) 
 	if len(obs) == 0 {
 		obs = []treatment.ObservationRecord{*req.Observation}
 	}
-	b, err := s.WF.AddObservations(id, expectedRevision(r), obs, req.Operator)
+	b, err := s.WF.AddObservationsContext(r.Context(), id, expectedRevision(r), obs, req.Operator)
 	if err != nil {
 		writeErr(w, err)
 		return

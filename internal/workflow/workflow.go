@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -731,6 +732,17 @@ func (w *Workflow) assignTask(id string, expected int, phase int, assignee strin
 
 func (w *Workflow) AddObservation(id string, expected int, o treatment.ObservationRecord, actor string) (ProtectionBatch, error) {
 	return w.AddObservations(id, expected, []treatment.ObservationRecord{o}, actor)
+}
+
+func (w *Workflow) AddObservationsContext(ctx context.Context, id string, expected int, observations []treatment.ObservationRecord, actor string) (ProtectionBatch, error) {
+	b, err := w.AddObservations(id, expected, observations, actor)
+	if err != nil {
+		return ProtectionBatch{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return ProtectionBatch{}, fmt.Errorf("观测请求已取消: %w", err)
+	}
+	return b, nil
 }
 
 func (w *Workflow) AddObservations(id string, expected int, observations []treatment.ObservationRecord, actor string) (ProtectionBatch, error) {
