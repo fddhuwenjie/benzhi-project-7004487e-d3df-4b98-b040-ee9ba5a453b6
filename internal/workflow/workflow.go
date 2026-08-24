@@ -150,6 +150,7 @@ type Workflow struct {
 	mu          sync.RWMutex
 	batches     map[string]*ProtectionBatch
 	idempotency map[string]idempotencyRecord
+	planCache   map[string]assessment.TreatmentPlan
 	archive     *archive.Store
 	seq         int
 }
@@ -165,7 +166,7 @@ type idempotencyRecord struct {
 }
 
 func New(a *archive.Store) *Workflow {
-	w := &Workflow{batches: map[string]*ProtectionBatch{}, idempotency: map[string]idempotencyRecord{}, archive: a}
+	w := &Workflow{batches: map[string]*ProtectionBatch{}, idempotency: map[string]idempotencyRecord{}, planCache: map[string]assessment.TreatmentPlan{}, archive: a}
 	var state persistedState
 	if a != nil && a.LoadState(&state) == nil && state.Batches != nil {
 		w.batches, w.seq = state.Batches, state.Seq
@@ -225,7 +226,7 @@ func (w *Workflow) Create(req CreateRequest, idem string) (ProtectionBatch, erro
 		b.Samples = append(b.Samples, s)
 	}
 	if len(b.Samples) > 0 {
-		plan, err := assessment.GeneratePlan(id, req.ResponsibleUser, b.Samples, 1)
+		plan, err := w.cachedInitialPlanLocked(id, req.ResponsibleUser, b.Samples)
 		if err != nil {
 			return ProtectionBatch{}, err
 		}
@@ -244,6 +245,32 @@ func (w *Workflow) Create(req CreateRequest, idem string) (ProtectionBatch, erro
 		w.idempotency["create:"+idem] = idempotencyRecord{Fingerprint: fingerprint, Batch: out}
 	}
 	return out, nil
+}
+
+func (w *Workflow) cachedInitialPlanLocked(batchID, author string, samples []assessment.Sample) (assessment.TreatmentPlan, error) {
+	profile := make([]string, 0, len(samples))
+	for _, sample := range samples {
+		profile = append(profile, strings.TrimSpace(sample.MaterialType)+":"+strings.TrimSpace(sample.ConditionGrade))
+	}
+	sort.Strings(profile)
+	key := strings.Join(profile, "|")
+	if template, ok := w.planCache[key]; ok {
+		plan := template
+		plan.ID = fmt.Sprintf("plan-%s-v1", batchID)
+		plan.BatchID = batchID
+		plan.Author = author
+		plan.PhaseSteps = append([]assessment.PhaseStep(nil), template.PhaseSteps...)
+		plan.DiffFields = append([]string(nil), template.DiffFields...)
+		return plan, nil
+	}
+	plan, err := assessment.GeneratePlan(batchID, author, samples, 1)
+	if err != nil {
+		return assessment.TreatmentPlan{}, err
+	}
+	template := plan
+	template.PhaseSteps = append([]assessment.PhaseStep(nil), plan.PhaseSteps...)
+	w.planCache[key] = template
+	return plan, nil
 }
 
 func requestFingerprint(req CreateRequest) string {
