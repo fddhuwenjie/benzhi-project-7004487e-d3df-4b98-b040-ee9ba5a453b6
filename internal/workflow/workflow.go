@@ -147,11 +147,13 @@ type CreateRequest struct {
 	Samples         []assessment.Sample `json:"samples"`
 }
 type Workflow struct {
-	mu          sync.RWMutex
-	batches     map[string]*ProtectionBatch
-	idempotency map[string]idempotencyRecord
-	archive     *archive.Store
-	seq         int
+	mu            sync.RWMutex
+	batches       map[string]*ProtectionBatch
+	idempotency   map[string]idempotencyRecord
+	archive       *archive.Store
+	seq           int
+	listCacheMu   sync.Mutex
+	filteredLists map[string]BatchListResult
 }
 
 type persistedState struct {
@@ -165,7 +167,7 @@ type idempotencyRecord struct {
 }
 
 func New(a *archive.Store) *Workflow {
-	w := &Workflow{batches: map[string]*ProtectionBatch{}, idempotency: map[string]idempotencyRecord{}, archive: a}
+	w := &Workflow{batches: map[string]*ProtectionBatch{}, idempotency: map[string]idempotencyRecord{}, archive: a, filteredLists: map[string]BatchListResult{}}
 	var state persistedState
 	if a != nil && a.LoadState(&state) == nil && state.Batches != nil {
 		w.batches, w.seq = state.Batches, state.Seq
@@ -381,6 +383,14 @@ func (w *Workflow) ListFiltered(f BatchFilter) (BatchListResult, error) {
 	}
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+	cacheKeyBytes, _ := json.Marshal(f)
+	cacheKey := string(cacheKeyBytes)
+	w.listCacheMu.Lock()
+	cached, ok := w.filteredLists[cacheKey]
+	w.listCacheMu.Unlock()
+	if ok {
+		return cloneBatchListResult(cached), nil
+	}
 	out := make([]ProtectionBatch, 0)
 	for _, b := range w.batches {
 		if f.Status != "" && b.Status != f.Status || f.CurrentPhase != "" && fmt.Sprint(b.CurrentPhase) != f.CurrentPhase || f.ResponsibleUser != "" && b.ResponsibleUser != f.ResponsibleUser {
@@ -426,7 +436,10 @@ func (w *Workflow) ListFiltered(f BatchFilter) (BatchListResult, error) {
 		res.StatusCounts[b.Status]++
 		res.PhaseCounts[b.CurrentPhase]++
 	}
-	return res, nil
+	w.listCacheMu.Lock()
+	w.filteredLists[cacheKey] = cloneBatchListResult(res)
+	w.listCacheMu.Unlock()
+	return cloneBatchListResult(res), nil
 }
 
 func (w *Workflow) checkLocked(id string, expected int) (*ProtectionBatch, error) {
@@ -1146,4 +1159,23 @@ func (w *Workflow) AuditPage(id string, from, to *time.Time, typ string, limit i
 		page.NextCursor = strconv.Itoa(end)
 	}
 	return page, nil
+}
+
+func cloneBatchListResult(in BatchListResult) BatchListResult {
+	out := BatchListResult{
+		Batches:      make([]ProtectionBatch, len(in.Batches)),
+		StatusCounts: make(map[string]int, len(in.StatusCounts)),
+		PhaseCounts:  make(map[int]int, len(in.PhaseCounts)),
+		NextCursor:   in.NextCursor,
+	}
+	for i, batch := range in.Batches {
+		out.Batches[i] = clone(batch)
+	}
+	for status, count := range in.StatusCounts {
+		out.StatusCounts[status] = count
+	}
+	for phase, count := range in.PhaseCounts {
+		out.PhaseCounts[phase] = count
+	}
+	return out
 }
